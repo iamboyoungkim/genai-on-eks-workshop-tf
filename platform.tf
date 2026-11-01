@@ -146,8 +146,18 @@ resource "helm_release" "litellm" {
     }
 
     serviceAccount = { create = true }
-    masterkey      = local.litellm_master_key
-    ingress        = { enabled = false }
+
+    # Chart >= 1.10x runs schema migrations in a separate Job and then sets
+    # DISABLE_SCHEMA_UPDATE=true on the proxy. Installed together with its bundled
+    # PostgreSQL, that Job starts before the database accepts connections, exhausts its
+    # retries and is garbage-collected (ttlSecondsAfterFinished), leaving an EMPTY schema:
+    # /key/list and every Virtual Key / team / budget call then fail with
+    # "table ... does not exist". With a single replica the proxy's own startup
+    # `prisma db push` is simpler and race-free, so the Job is turned off.
+    migrationJob = { enabled = false }
+
+    masterkey = local.litellm_master_key
+    ingress   = { enabled = false }
 
     envVars = {
       UI_USERNAME         = "admin"
