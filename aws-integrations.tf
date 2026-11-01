@@ -12,7 +12,8 @@ locals {
   })
 
   # global.anthropic.claude-... -> anthropic.claude-... (foundation model behind the profile)
-  bedrock_foundation_ids = distinct([for id in values(var.bedrock_models) : replace(id, "/^(global|us|eu|apac|jp|au)\\./", "")])
+  bedrock_all_model_ids  = distinct(concat(values(var.bedrock_models), var.bedrock_extra_model_ids))
+  bedrock_foundation_ids = distinct([for id in local.bedrock_all_model_ids : replace(id, "/^(global|us|eu|apac|jp|au)\\./", "")])
 }
 
 # ------------------------------- Langfuse -> S3 -----------------------------
@@ -79,7 +80,7 @@ resource "aws_iam_role_policy" "litellm_bedrock" {
       Effect = "Allow"
       Action = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
       Resource = concat(
-        [for id in values(var.bedrock_models) : "arn:aws:bedrock:${var.region}:${data.aws_caller_identity.current.account_id}:inference-profile/${id}"],
+        [for id in local.bedrock_all_model_ids : "arn:aws:bedrock:${var.region}:${data.aws_caller_identity.current.account_id}:inference-profile/${id}"],
         [for id in local.bedrock_foundation_ids : "arn:aws:bedrock:*::foundation-model/${id}"],
       )
     }]

@@ -34,6 +34,35 @@ make destroy
 AWS credentials come from your default CLI configuration (or `AWS_PROFILE`); the default region is `us-west-2` (the upstream workshop region). Before choosing another region, make sure it has inf2 capacity and a free Elastic IP: the NAT gateway needs one, and `AddressLimitExceeded` aborts the apply half-way.
 Requirements: Terraform >= 1.5, AWS CLI, kubectl. Helm is optional (debugging only).
 
+### Following the workshop labs against this stack
+
+The labs assume an event-provisioned environment (the starter-kit at `/workshop`, `/workshop/.env`, public Ingress URLs, Terraform
+outputs next to the components). This stack exposes nothing publicly, so a small compatibility layer rebuilds what the labs need locally:
+
+```bash
+make workshop-setup   # starter-kit @ the pinned commit -> .workshop/starter-kit, its .env, components/ai-gateway/litellm/values.rendered.yaml
+make pf-start         # detached, auto-restarting port-forwards on 127.0.0.1: Open WebUI :8000, LiteLLM :4000, Langfuse :3000
+eval "$(scripts/workshop.sh env)"   # in each terminal you follow the labs in (bash or zsh)
+make workshop-status  # what is set up / listening; `make pf-stop` stops the forwards
+```
+
+After `eval`, the lab commands work as written:
+
+- `source /workshop/.env` / `$LITELLM_MASTER_KEY`, `$REGION`, `$EKS_CLUSTER_NAME`, `$LANGFUSE_*`: set from `.workshop/starter-kit/.env`.
+  The labs append `AGENT_KEY` there; it survives `make workshop-setup`.
+- `kubectl get ingress -n litellm litellm -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'` (also langfuse, openwebui):
+  a `kubectl` shim answers exactly this lookup with `127.0.0.1:<port>`; every other `kubectl` call is untouched.
+- `terraform output -raw langfuse_bucket_name` / `langfuse_s3_role_arn` run from `components/o11y/langfuse`: a `terraform` shim forwards them
+  to this stack (the A2 `deploy-workshop-app.sh` then runs without prompts).
+- A1 "add GPT-OSS-20B": edit `$WORKSHOP_DIR/components/ai-gateway/litellm/values.rendered.yaml`, then run the lab's `helm upgrade`.
+  The LiteLLM role is already allowed to invoke `openai.gpt-oss-20b-1:0` (`bedrock_extra_model_ids`). The change lives only in the Helm release:
+  to keep it across `terraform apply`, add `"gpt-oss-20b" = "openai.gpt-oss-20b-1:0"` to `bedrock_models` in `terraform.tfvars`.
+- The pages' absolute `/workshop/...` paths: use `$WORKSHOP_DIR/...`, or make them literal with `sudo ln -s "$PWD/.workshop/starter-kit" /workshop`.
+
+`make workshop-setup` never overwrites an edited `values.rendered.yaml` (regenerate with `FORCE_VALUES=1 make workshop-setup`).
+Everything under `.workshop/` is git-ignored and holds credentials (mode 600/700).
+Not provided: the labs' own installs (KEDA, ADOT/AMP/AMG, External Secrets, KubeRay), the VSC IDE, and the GPU node pool.
+
 ### Saving cost between sessions: pause / resume
 
 EKS Auto Mode nodes are Karpenter-managed EC2 instances and cannot be stopped or resized by hand. To stop paying for them,

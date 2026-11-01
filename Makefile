@@ -16,7 +16,7 @@ REGION ?= $(shell terraform output -raw region 2>/dev/null || echo us-west-2)
 LOG_DIR := logs
 TF_FLAGS := -no-color -input=false
 
-.PHONY: help tfvars init validate plan apply apply-bg destroy destroy-bg logs logs-tail kubeconfig creds status port-forward pause pause-models resume pause-status check-not-paused
+.PHONY: help tfvars init validate plan apply apply-bg destroy destroy-bg logs logs-tail kubeconfig creds status port-forward pause pause-models resume pause-status check-not-paused workshop-setup workshop-status pf-start pf-stop
 
 help:
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*##/ -/'
@@ -72,6 +72,18 @@ pause-models: ## scale only the inf2 vLLM models to 0 (keeps LiteLLM/Langfuse/Op
 resume: ## restore everything that `pause` / `pause-models` stopped (waits until the models are ready, ~15-20 min)
 	@mkdir -p $(LOG_DIR); f=$(LOG_DIR)/resume-$$(date +%Y%m%d-%H%M%S).log; ln -sf $$(basename $$f) $(LOG_DIR)/latest.log; \
 	  scripts/pause.sh resume 2>&1 | tee $$f
+
+workshop-setup: ## prepare what the workshop labs expect (starter-kit checkout, .env, values.rendered.yaml)
+	@scripts/workshop.sh setup
+
+workshop-status: ## show the workshop workspace and which loopback ports are served
+	@scripts/workshop.sh status
+
+pf-start: ## keep Open WebUI :8000, LiteLLM :4000, Langfuse :3000 reachable on 127.0.0.1 (detached, auto-restarting)
+	@scripts/workshop.sh pf-start
+
+pf-stop: ## stop the detached port-forwards started by pf-start
+	@scripts/workshop.sh pf-stop
 
 pause-status: ## show replicas / paused state of every workload and the current nodes
 	@scripts/pause.sh status

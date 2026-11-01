@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Workshop compatibility shim for kubectl (see scripts/workshop.sh).
+#
+# The workshop looks up public URLs with
+#     kubectl get ingress -n <ns> <name> -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+# This stack deliberately has no Ingress/ALB (nothing is exposed publicly), so that command would print
+# nothing. ONLY that exact lookup is answered here, with the loopback address that `make pf-start`
+# (or `make port-forward`) serves. Every other kubectl call is passed through unchanged.
+#
+# Not using `set -u`: bash 3.2 (macOS default) treats empty arrays as unset.
+
+SHIM_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REAL="$(PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -v -x -F "$SHIM_DIR" | paste -s -d: -)" command -v kubectl)"
+if [ -z "$REAL" ]; then
+  echo "kubectl shim: the real kubectl was not found on PATH" >&2
+  exit 127
+fi
+
+ns=""
+jp=""
+pos=()
+args=("$@")
+i=0
+while [ "$i" -lt "${#args[@]}" ]; do
+  a="${args[$i]}"
+  case "$a" in
+    -n|--namespace) ns="${args[$((i + 1))]:-}"; i=$((i + 2)); continue ;;
+    --namespace=*)  ns="${a#*=}" ;;
+    -o|--output)
+      o="${args[$((i + 1))]:-}"
+      case "$o" in jsonpath=*) jp="${o#jsonpath=}" ;; esac
+      i=$((i + 2)); continue ;;
+    -o=*|--output=*)
+      o="${a#*=}"
+      case "$o" in jsonpath=*) jp="${o#jsonpath=}" ;; esac ;;
+    -ojsonpath=*)   jp="${a#-ojsonpath=}" ;;
+    -*) ;;
+    *) pos+=("$a") ;;
+  esac
+  i=$((i + 1))
+done
+
+if [ "${pos[0]:-}" = "get" ]; then
+  case "${pos[1]:-}" in
+    ingress|ingresses|ing)
+      case "$jp" in
+        *hostname*)
+          case "${ns}/${pos[2]:-}" in
+            litellm/litellm)     printf '%s' "127.0.0.1:4000"; exit 0 ;;
+            langfuse/langfuse)   printf '%s' "127.0.0.1:3000"; exit 0 ;;
+            openwebui/openwebui) printf '%s' "127.0.0.1:8000"; exit 0 ;;
+          esac ;;
+      esac ;;
+  esac
+fi
+
+exec "$REAL" "$@"

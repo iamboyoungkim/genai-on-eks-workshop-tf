@@ -21,3 +21,6 @@ logs/
 *.key
 .env
 .env.*
+
+# Workshop compatibility workspace (starter-kit checkout, .env and rendered values hold credentials)
+.workshop/

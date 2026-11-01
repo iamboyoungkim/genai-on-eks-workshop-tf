@@ -94,6 +94,16 @@ variable "bedrock_models" {
   }
 }
 
+variable "bedrock_extra_model_ids" {
+  description = <<-EOT
+    Bedrock model ids the LiteLLM role may invoke in addition to bedrock_models, WITHOUT adding them to
+    LiteLLM. Lets the workshop's A1 lab ("add GPT-OSS-20B to LiteLLM", done by hand with helm upgrade)
+    work: the model id there is openai.gpt-oss-20b-1:0.
+  EOT
+  type        = list(string)
+  default     = ["openai.gpt-oss-20b-1:0"]
+}
+
 variable "admin_email" {
   description = "Admin login e-mail for Langfuse and Open WebUI. Passwords are generated (see `terraform output`)."
   type        = string

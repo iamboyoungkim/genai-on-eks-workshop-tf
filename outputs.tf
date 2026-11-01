@@ -30,5 +30,20 @@ output "credentials" {
     litellm_ui_user     = "admin"
     litellm_ui_password = random_password.litellm_ui.result
     litellm_master_key  = local.litellm_master_key
+    langfuse_public_key = local.langfuse_public_key
+    langfuse_secret_key = local.langfuse_secret_key
   }
+}
+
+# The workshop's A2 deploy script reads these two with `terraform output -raw ...`
+# (upstream defines them in components/o11y/langfuse). scripts/workshop-shim/terraform
+# forwards those calls to this stack.
+output "langfuse_bucket_name" {
+  description = "S3 bucket used by Langfuse (Loan Buddy stores uploaded documents here)."
+  value       = aws_s3_bucket.langfuse.id
+}
+
+output "langfuse_s3_role_arn" {
+  description = "IAM role (Pod Identity) that grants Langfuse access to that bucket."
+  value       = aws_iam_role.langfuse.arn
 }

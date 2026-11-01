@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Workshop compatibility shim for terraform (see scripts/workshop.sh).
+#
+# The workshop's A2 deploy script runs, from <starter-kit>/components/o11y/langfuse:
+#     terraform output -raw langfuse_bucket_name
+#     terraform output -raw langfuse_s3_role_arn
+# Here those values live in this repository's stack, so `terraform output ...` run from inside that
+# directory is forwarded to the stack (WORKSHOP_STACK_DIR). Everything else is passed through unchanged.
+
+SHIM_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REAL="$(PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -v -x -F "$SHIM_DIR" | paste -s -d: -)" command -v terraform)"
+if [ -z "$REAL" ]; then
+  echo "terraform shim: the real terraform was not found on PATH" >&2
+  exit 127
+fi
+
+if [ "${1:-}" = "output" ] && [ -n "${WORKSHOP_STACK_DIR:-}" ]; then
+  case "$PWD" in
+    */components/o11y/langfuse|*/components/o11y/langfuse/*)
+      shift
+      exec "$REAL" -chdir="$WORKSHOP_STACK_DIR" output "$@" ;;
+  esac
+fi
+
+exec "$REAL" "$@"
