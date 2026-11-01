@@ -1,72 +1,76 @@
 # genai-on-eks-workshop-tf
 
-[K8s Agentic Platform 워크샵](https://catalog.workshops.aws/k8sagenticplatform/)의 인프라를 **`terraform apply` 한 번**으로 올리는 구성입니다.
-업스트림 [`aws-samples/sample-genai-on-eks-starter-kit`](https://github.com/aws-samples/sample-genai-on-eks-starter-kit)의
-`./cli demo-setup` (Terraform + Node.js CLI + Helm/kubectl)을 순수 Terraform으로 옮겼습니다.
+Infrastructure for the [K8s Agentic Platform workshop](https://catalog.workshops.aws/k8sagenticplatform/) in a **single `terraform apply`**.
+It ports the upstream [`aws-samples/sample-genai-on-eks-starter-kit`](https://github.com/aws-samples/sample-genai-on-eks-starter-kit)
+`./cli demo-setup` flow (Terraform for the cluster, a Node.js CLI for Helm/kubectl) to plain Terraform.
 
-## 설치되는 것 (워크샵 기준 `config.workshop.json`과 동일)
+## What gets installed (matches the workshop's `config.workshop.json`)
 
-| 레이어 | 내용 |
+| Layer | Contents |
 |---|---|
-| 기반 | VPC(NAT 1개), EKS Auto Mode, NodePool(default / neuron), EBS·EFS StorageClass, metrics-server |
-| 모델 | vLLM on Neuron(inf2.xlarge): `qwen3-8b-neuron`, `deepseek-r1-qwen3-8b-neuron` (모델 내장 이미지, HF 토큰 불필요) |
-| 게이트웨이 | LiteLLM (vLLM 2종 + Bedrock `claude-4.5-sonnet`) |
-| 관측 | Langfuse (S3 + Pod Identity), LiteLLM trace 연동 |
-| UI | Open WebUI (LiteLLM 연결) |
+| Foundation | VPC (single NAT), EKS Auto Mode, `default` and `neuron` NodePools, EBS and EFS StorageClasses, metrics-server |
+| Models | vLLM on Neuron (inf2.xlarge): `qwen3-8b-neuron`, `deepseek-r1-qwen3-8b-neuron` (pre-built images with the model baked in, no HF token needed) |
+| Gateway | LiteLLM (the two vLLM models plus Bedrock `claude-4.5-sonnet`) |
+| Observability | Langfuse (S3 + Pod Identity), wired to LiteLLM traces |
+| UI | Open WebUI, connected to LiteLLM |
 
-설치하지 않는 것: Kong, Milvus/Qdrant/Chroma, TEI, MLflow/Phoenix, guardrail, n8n, OpenClaw, GPU(NVIDIA) NodePool 등 워크샵 설정에 없는 항목.
+Not installed (not in the workshop config): Kong, Milvus/Qdrant/Chroma, TEI, MLflow/Phoenix, guardrails, n8n, OpenClaw, NVIDIA GPU NodePool.
 
-## 사용법
+## Usage
 
 ```bash
-make tfvars     # 현재 공인 IP를 EKS API 허용 CIDR로 terraform.tfvars에 기록
+make tfvars         # write terraform.tfvars with your current public IP as the EKS API allow-list
 make validate
-make plan       # 반드시 검토 (현재 100 resources to add)
+make plan           # review it before applying (currently 100 resources to add)
 make apply
 make kubeconfig && make status
-make creds      # 생성된 계정 정보 출력
-make port-forward   # 127.0.0.1 로만 바인딩 (Open WebUI :8000, LiteLLM :4000, Langfuse :3000)
+make creds          # print the generated credentials
+make port-forward   # binds 127.0.0.1 only: Open WebUI :8000, LiteLLM :4000, Langfuse :3000
 make destroy
 ```
 
-AWS 자격증명은 기본 CLI 설정(또는 `AWS_PROFILE`)을 사용하고 기본 리전은 `ap-northeast-2`입니다.
-필수 도구: terraform ≥ 1.5, aws cli, kubectl, helm(선택, 디버깅용).
+AWS credentials come from your default CLI configuration (or `AWS_PROFILE`); the default region is `ap-northeast-2`.
+Requirements: Terraform >= 1.5, AWS CLI, kubectl. Helm is optional (debugging only).
 
-첫 배포는 inf2 노드 기동 + 대용량 이미지 pull + 모델 로드 때문에 모델 Pod가 Ready가 되기까지 시간이 걸립니다
-(`kubectl -n vllm get pods -w`). vLLM 매니페스트는 apply를 막지 않도록 `wait = false`입니다.
+The first deployment takes a while: an inf2 node must start, large images must be pulled and the Neuron model must load,
+so the model pods are not Ready right away (`kubectl -n vllm get pods -w`). The vLLM manifests use `wait = false`
+so `terraform apply` does not block on that.
 
-## 보안 기본값
+## Security defaults
 
-- 외부 노출 없음: Ingress/ALB/LoadBalancer를 만들지 않고 모든 Service는 ClusterIP입니다. 접속은 `make port-forward`(loopback)로만 합니다.
-- EKS API 퍼블릭 엔드포인트는 `api_allowed_cidrs`로 제한됩니다. 기본값이 없고 `0.0.0.0/0`은 거부됩니다.
-- 모든 비밀번호/키는 `random_password`로 생성합니다(업스트림의 `password123` 등 고정값 제거). 값은 Terraform state에 저장되므로
-  **state를 커밋/공유하지 마세요**(.gitignore 처리됨). 공유가 필요하면 암호화된 원격 backend로 옮기세요.
-- LiteLLM의 Bedrock 권한은 설정한 모델(inference profile / foundation model)로만 제한합니다(업스트림은 `*`).
-- AWS 접근은 EKS Pod Identity만 사용하며 정적 키는 없습니다.
-- Langfuse S3 버킷은 Block Public Access 4종 + SSE이며, 워크샵 편의상 `force_destroy = true`입니다.
+- **Nothing is exposed publicly.** No Ingress, ALB or LoadBalancer is created and every Service is ClusterIP.
+  Access the UIs through `make port-forward` (loopback only).
+- **The public EKS API endpoint is restricted** to `api_allowed_cidrs`. There is no default and `0.0.0.0/0` is rejected.
+- **All passwords and keys are generated** with `random_password` (the upstream fixed defaults such as `password123` are removed).
+  They are stored in the Terraform state, so **never commit or share the state** (it is git-ignored).
+  Move it to an encrypted remote backend if you need to share the stack.
+- **Least-privilege Bedrock access:** the LiteLLM role can invoke only the configured inference profiles and foundation models
+  (upstream allows invoke on `*`).
+- **No static AWS keys:** the cluster uses EKS Pod Identity only.
+- The Langfuse S3 bucket has all four Block Public Access settings and SSE enabled. It uses `force_destroy = true` for workshop convenience.
 
-## 업스트림 기준과 차이
+## Differences from upstream
 
-기준: `aws-samples/sample-genai-on-eks-starter-kit` @ `0052c58` (2026-10-15, main).
+Baseline: `aws-samples/sample-genai-on-eks-starter-kit` @ `0052c58` (2026-10-15, `main`).
 
-| 항목 | 업스트림 | 여기 |
+| Area | Upstream | This repo |
 |---|---|---|
-| 설치 방식 | Terraform(클러스터) + Node.js CLI(컴포넌트) | 단일 Terraform |
-| 노출 | `internet-facing-alb` Ingress (DOMAIN 비면 공개 ALB) | 없음, port-forward |
-| 계정/키 | `.env` 고정 기본값 | `random_password` |
-| Langfuse 차트 | 버전 미고정 (현재 latest=2.x, values 스키마 불일치) | `1.5.41` 고정 |
-| LiteLLM 차트 | 미고정 | `1.106.6` 고정 |
-| Open WebUI 차트 | 12.8.1 | 12.8.1 |
-| GPU NodePool/NodeClass | 있음 | 제외 (inf2 워크샵) |
-| ALB controller, external-dns, ingress-nginx, LWS | 있음 | 제외 (노출 없음) |
-| EKS 노드 IAM의 ECR pull-through cache | 있음 | 제외 |
-| kubeconfig | `~/.kube/config` 수정 (local-exec) | `make kubeconfig` → `./.kubeconfig` |
+| Install method | Terraform (cluster) + Node.js CLI (components) | Single Terraform root |
+| Exposure | `internet-facing-alb` Ingress (a public ALB when `DOMAIN` is empty) | None, use port-forward |
+| Credentials | Fixed defaults in `.env` | `random_password` |
+| Langfuse chart | Unpinned (latest is now 2.x, which does not match the values schema) | Pinned to `1.5.41` |
+| LiteLLM chart | Unpinned | Pinned to `1.106.6` |
+| Open WebUI chart | `12.8.1` | `12.8.1` |
+| GPU NodePool / NodeClass | Included | Removed (this workshop uses inf2) |
+| ALB controller, external-dns, ingress-nginx, LWS | Included | Removed (nothing is exposed) |
+| ECR pull-through cache policy on node role | Included | Removed |
+| kubeconfig | Modifies `~/.kube/config` (local-exec) | `make kubeconfig` writes `./.kubeconfig` |
 
-`modules/eks-auto-mode/`와 `network.tf`는 업스트림 `terraform/`에서 가져와 줄인 것이고, `manifests/vllm/`은 업스트림
-`components/llm-model/vllm/model-*-neuron.template.yaml`을 그대로 복사한 것입니다. 업스트림이 바뀌면 해당 경로를 diff 하세요.
+`modules/eks-auto-mode/` and `network.tf` are trimmed from upstream `terraform/`. `manifests/vllm/` is copied verbatim from upstream
+`components/llm-model/vllm/model-*-neuron.template.yaml`. When upstream changes, diff those paths.
 
-## 알려진 주의점
+## Known caveats
 
-- Langfuse 2.x 차트로 올리려면 ClickHouse operator + cert-manager 선행 설치와 values 재작성이 필요합니다.
-- Neuron/Bedrock 가용성과 쿼터는 리전/계정마다 다릅니다(Inf 온디맨드 vCPU 쿼터, Bedrock 모델 접근).
-- 클러스터 이름을 바꾸면 `name` 변수 하나만 바꾸면 됩니다(리소스 이름이 모두 파생됩니다).
+- Moving to the Langfuse 2.x chart requires installing the ClickHouse operator and cert-manager first, plus a rewrite of the values.
+- Neuron and Bedrock availability and quotas differ per region and account (on-demand Inf vCPU quota, Bedrock model access).
+- To rename the stack, change the `name` variable only; all resource names derive from it.
