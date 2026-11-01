@@ -5,6 +5,10 @@ metadata:
   namespace: vllm
 spec:
   replicas: 1
+  # One pod occupies a whole inf2 node (all neuroncores). A rolling update would start a
+  # second inf2 node for the new pod and double the cost for ~15 min on every change.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: deepseek-r1-qwen3-8b-neuron
@@ -56,6 +60,22 @@ spec:
           ports:
             - name: http
               containerPort: 8000
+          # Added vs upstream: without probes the pod is "Ready" as soon as the container
+          # starts, while the Neuron model is still loading (minutes), so Service traffic and
+          # `rollout status` report success too early. /health answers only once the engine is up.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            failureThreshold: 180 # up to 30 min for node start + model load
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
           resources:
             requests:
               cpu: 3 #75%

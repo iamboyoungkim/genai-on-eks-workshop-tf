@@ -16,7 +16,7 @@ REGION ?= $(shell terraform output -raw region 2>/dev/null || echo us-west-2)
 LOG_DIR := logs
 TF_FLAGS := -no-color -input=false
 
-.PHONY: help tfvars init validate plan apply apply-bg destroy destroy-bg logs logs-tail kubeconfig creds status port-forward
+.PHONY: help tfvars init validate plan apply apply-bg destroy destroy-bg logs logs-tail kubeconfig creds status port-forward pause pause-models resume pause-status check-not-paused
 
 help:
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*##/ -/'
@@ -37,11 +37,11 @@ plan: init ## terraform plan -> tfplan (logged)
 	@mkdir -p $(LOG_DIR); f=$(LOG_DIR)/plan-$$(date +%Y%m%d-%H%M%S).log; ln -sf $$(basename $$f) $(LOG_DIR)/latest.log; \
 	  echo "log: $$f"; terraform plan $(TF_FLAGS) -out=tfplan 2>&1 | tee $$f
 
-apply: ## apply the saved plan in the foreground (logged; run `make plan` first and review it)
+apply: check-not-paused ## apply the saved plan in the foreground (logged; run `make plan` first and review it)
 	@mkdir -p $(LOG_DIR); f=$(LOG_DIR)/apply-$$(date +%Y%m%d-%H%M%S).log; ln -sf $$(basename $$f) $(LOG_DIR)/latest.log; \
 	  echo "log: $$f"; terraform apply $(TF_FLAGS) tfplan 2>&1 | tee $$f
 
-apply-bg: ## apply the saved plan fully detached (survives a closed terminal); follow with `make logs`
+apply-bg: check-not-paused ## apply the saved plan fully detached (survives a closed terminal); follow with `make logs`
 	@mkdir -p $(LOG_DIR); f=$(LOG_DIR)/apply-$$(date +%Y%m%d-%H%M%S).log; ln -sf $$(basename $$f) $(LOG_DIR)/latest.log; \
 	  nohup bash -c 'terraform apply $(TF_FLAGS) tfplan; echo "EXIT=$$?"' > $$f 2>&1 < /dev/null & \
 	  echo "started pid $$! -> $$f"
@@ -55,6 +55,26 @@ destroy-bg: ## detached destroy WITHOUT a prompt; requires CONFIRM=yes
 	@mkdir -p $(LOG_DIR); f=$(LOG_DIR)/destroy-$$(date +%Y%m%d-%H%M%S).log; ln -sf $$(basename $$f) $(LOG_DIR)/latest.log; \
 	  nohup bash -c 'terraform destroy $(TF_FLAGS) -auto-approve; echo "EXIT=$$?"' > $$f 2>&1 < /dev/null & \
 	  echo "started pid $$! -> $$f"
+
+check-not-paused:
+	@if [ -z "$(FORCE)" ] && scripts/pause.sh is-paused; then \
+	  echo "Workloads are paused: 'terraform apply' would scale the vLLM models back up."; \
+	  echo "Run 'make resume' first, or 'make apply FORCE=1' if that is what you want."; exit 1; fi
+
+pause: ## scale ALL workshop workloads to 0 (nodes disappear, volumes kept); resume with `make resume`
+	@mkdir -p $(LOG_DIR); f=$(LOG_DIR)/pause-$$(date +%Y%m%d-%H%M%S).log; ln -sf $$(basename $$f) $(LOG_DIR)/latest.log; \
+	  scripts/pause.sh pause 2>&1 | tee $$f
+
+pause-models: ## scale only the inf2 vLLM models to 0 (keeps LiteLLM/Langfuse/Open WebUI; Bedrock keeps working)
+	@mkdir -p $(LOG_DIR); f=$(LOG_DIR)/pause-$$(date +%Y%m%d-%H%M%S).log; ln -sf $$(basename $$f) $(LOG_DIR)/latest.log; \
+	  scripts/pause.sh pause-models 2>&1 | tee $$f
+
+resume: ## restore everything that `pause` / `pause-models` stopped (waits until the models are ready, ~15-20 min)
+	@mkdir -p $(LOG_DIR); f=$(LOG_DIR)/resume-$$(date +%Y%m%d-%H%M%S).log; ln -sf $$(basename $$f) $(LOG_DIR)/latest.log; \
+	  scripts/pause.sh resume 2>&1 | tee $$f
+
+pause-status: ## show replicas / paused state of every workload and the current nodes
+	@scripts/pause.sh status
 
 logs: ## follow the newest log live (Ctrl-C to stop; does not stop terraform)
 	@tail -n 40 -f $(LOG_DIR)/latest.log
