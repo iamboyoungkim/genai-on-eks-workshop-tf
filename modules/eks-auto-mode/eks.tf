@@ -17,6 +17,21 @@ module "eks" {
 
   enable_cluster_creator_admin_permissions = true
 
+  # Console visibility: the EKS Console lists nodes/workloads only for principals that
+  # have an access entry. The creator gets one automatically (above); add the role you
+  # use in the Console here.
+  access_entries = {
+    for i, arn in var.cluster_admin_principal_arns : "admin-${i}" => {
+      principal_arn = arn
+      policy_associations = {
+        cluster_admin = {
+          policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope = { type = "cluster" }
+        }
+      }
+    }
+  }
+
   compute_config = {
     enabled    = true
     node_pools = ["general-purpose"]

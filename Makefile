@@ -1,12 +1,22 @@
 # One-shot installer for the "K8s Agentic Platform" workshop stack on EKS Auto Mode.
 # Uses the default AWS CLI credentials/region unless AWS_PROFILE / AWS_REGION are set.
+#
+# Logging: plan/apply/destroy stream to your terminal AND to logs/<op>-<timestamp>.log
+# (logs/latest.log always points at the newest). The *-bg targets run fully detached,
+# write only to the log file and end it with an "EXIT=<code>" line; follow them with
+# `make logs` (live) or `make logs-tail` (last lines, non-blocking).
 
 SHELL := /bin/bash
+.SHELLFLAGS := -o pipefail -c
 export KUBECONFIG := $(CURDIR)/.kubeconfig
-NAME   ?= $(shell terraform output -raw cluster_name 2>/dev/null || echo genai-on-eks)
-REGION ?= $(shell terraform output -raw region 2>/dev/null || echo ap-northeast-2)
+export TF_IN_AUTOMATION := 1
 
-.PHONY: help tfvars init validate plan apply destroy kubeconfig creds status port-forward
+NAME   ?= $(shell terraform output -raw cluster_name 2>/dev/null || echo genai-on-eks)
+REGION ?= $(shell terraform output -raw region 2>/dev/null || echo us-west-2)
+LOG_DIR := logs
+TF_FLAGS := -no-color -input=false
+
+.PHONY: help tfvars init validate plan apply apply-bg destroy destroy-bg logs logs-tail kubeconfig creds status port-forward
 
 help:
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*##/ -/'
@@ -17,20 +27,40 @@ tfvars: ## write terraform.tfvars with your current public IP for the EKS API al
 	  printf 'api_allowed_cidrs = ["%s/32"]\n' "$$ip" > terraform.tfvars && cat terraform.tfvars
 
 init: ## terraform init
-	terraform init
+	terraform init -input=false
 
 validate: init ## fmt check + validate
 	terraform fmt -check -recursive
 	terraform validate
 
-plan: init ## terraform plan -> tfplan
-	terraform plan -out=tfplan
+plan: init ## terraform plan -> tfplan (logged)
+	@mkdir -p $(LOG_DIR); f=$(LOG_DIR)/plan-$$(date +%Y%m%d-%H%M%S).log; ln -sf $$(basename $$f) $(LOG_DIR)/latest.log; \
+	  echo "log: $$f"; terraform plan $(TF_FLAGS) -out=tfplan 2>&1 | tee $$f
 
-apply: ## apply the saved plan (run `make plan` first and review it)
-	terraform apply tfplan
+apply: ## apply the saved plan in the foreground (logged; run `make plan` first and review it)
+	@mkdir -p $(LOG_DIR); f=$(LOG_DIR)/apply-$$(date +%Y%m%d-%H%M%S).log; ln -sf $$(basename $$f) $(LOG_DIR)/latest.log; \
+	  echo "log: $$f"; terraform apply $(TF_FLAGS) tfplan 2>&1 | tee $$f
 
-destroy: ## tear everything down (asks for confirmation)
-	terraform destroy
+apply-bg: ## apply the saved plan fully detached (survives a closed terminal); follow with `make logs`
+	@mkdir -p $(LOG_DIR); f=$(LOG_DIR)/apply-$$(date +%Y%m%d-%H%M%S).log; ln -sf $$(basename $$f) $(LOG_DIR)/latest.log; \
+	  nohup bash -c 'terraform apply $(TF_FLAGS) tfplan; echo "EXIT=$$?"' > $$f 2>&1 < /dev/null & \
+	  echo "started pid $$! -> $$f"
+
+destroy: ## tear everything down (asks for confirmation, logged)
+	@mkdir -p $(LOG_DIR); f=$(LOG_DIR)/destroy-$$(date +%Y%m%d-%H%M%S).log; ln -sf $$(basename $$f) $(LOG_DIR)/latest.log; \
+	  echo "log: $$f"; terraform destroy -no-color 2>&1 | tee $$f
+
+destroy-bg: ## detached destroy WITHOUT a prompt; requires CONFIRM=yes
+	@test "$(CONFIRM)" = yes || { echo "refusing: run 'make destroy-bg CONFIRM=yes' to destroy without a prompt"; exit 1; }
+	@mkdir -p $(LOG_DIR); f=$(LOG_DIR)/destroy-$$(date +%Y%m%d-%H%M%S).log; ln -sf $$(basename $$f) $(LOG_DIR)/latest.log; \
+	  nohup bash -c 'terraform destroy $(TF_FLAGS) -auto-approve; echo "EXIT=$$?"' > $$f 2>&1 < /dev/null & \
+	  echo "started pid $$! -> $$f"
+
+logs: ## follow the newest log live (Ctrl-C to stop; does not stop terraform)
+	@tail -n 40 -f $(LOG_DIR)/latest.log
+
+logs-tail: ## print the last 40 lines of the newest log and whether it has finished
+	@tail -n 40 $(LOG_DIR)/latest.log; echo; grep -E '^EXIT=' $(LOG_DIR)/latest.log || echo "(still running or foreground run)"
 
 kubeconfig: ## project-local kubeconfig (./.kubeconfig), leaves ~/.kube/config untouched
 	aws eks update-kubeconfig --region $(REGION) --name $(NAME) --kubeconfig $(CURDIR)/.kubeconfig

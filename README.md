@@ -22,19 +22,33 @@ Not installed (not in the workshop config): Kong, Milvus/Qdrant/Chroma, TEI, MLf
 make tfvars         # write terraform.tfvars with your current public IP as the EKS API allow-list
 make validate
 make plan           # review it before applying (currently 100 resources to add)
-make apply
+make apply          # foreground; streams to the terminal and to logs/apply-<timestamp>.log
+# or, fully detached (survives a closed terminal / tool timeouts):
+make apply-bg && make logs        # `make logs-tail` prints the last lines and the EXIT= code
 make kubeconfig && make status
 make creds          # print the generated credentials
 make port-forward   # binds 127.0.0.1 only: Open WebUI :8000, LiteLLM :4000, Langfuse :3000
 make destroy
 ```
 
-AWS credentials come from your default CLI configuration (or `AWS_PROFILE`); the default region is `ap-northeast-2`.
+AWS credentials come from your default CLI configuration (or `AWS_PROFILE`); the default region is `us-west-2` (the upstream workshop region). Before choosing another region, make sure it has inf2 capacity and a free Elastic IP: the NAT gateway needs one, and `AddressLimitExceeded` aborts the apply half-way.
 Requirements: Terraform >= 1.5, AWS CLI, kubectl. Helm is optional (debugging only).
 
+### Seeing the cluster in the AWS Console
+
+The EKS Console lists nodes and workloads only for IAM principals that have an EKS access entry. Terraform grants one to
+the identity that runs it automatically. If you sign in to the Console with a different role (typical with SSO or an `Admin`
+role), put it in `terraform.tfvars`:
+
+```hcl
+cluster_admin_principal_arns = ["arn:aws:iam::<account-id>:role/Admin"]   # SSO roles: drop the aws-reserved/sso.amazonaws.com/<region>/ path
+```
+
+It receives `AmazonEKSClusterAdminPolicy`. Without it the Console shows "Your current IAM principal doesn't have access to Kubernetes objects".
+
 The first deployment takes a while: an inf2 node must start, large images must be pulled and the Neuron model must load,
-so the model pods are not Ready right away (`kubectl -n vllm get pods -w`). The vLLM manifests use `wait = false`
-so `terraform apply` does not block on that.
+so the model pods are not Ready right away (`kubectl -n vllm get pods -w`; allow roughly 10 minutes). The vLLM manifests use
+`wait_for_rollout = false` so `terraform apply` does not block on that (the provider's default rollout wait times out after about 10 minutes).
 
 ## Security defaults
 

@@ -5,9 +5,9 @@ variable "name" {
 }
 
 variable "region" {
-  description = "AWS region. Must offer inf2 instances (ap-northeast-2 does)."
+  description = "AWS region. Must offer inf2 instances and have a free Elastic IP for the NAT gateway. Defaults to the upstream workshop region."
   type        = string
-  default     = "ap-northeast-2"
+  default     = "us-west-2"
 }
 
 variable "eks_cluster_version" {
@@ -42,6 +42,24 @@ variable "api_allowed_cidrs" {
   validation {
     condition     = length(var.api_allowed_cidrs) > 0 && !contains(var.api_allowed_cidrs, "0.0.0.0/0")
     error_message = "api_allowed_cidrs must be non-empty and must not contain 0.0.0.0/0."
+  }
+}
+
+variable "cluster_admin_principal_arns" {
+  description = <<-EOT
+    IAM principals (roles or users) that get EKS cluster-admin access in addition to the
+    identity running Terraform. Needed so the AWS Console can show nodes/workloads: the
+    Console only lists Kubernetes resources for principals that have an EKS access entry.
+    Set it to the role you sign in to the Console with, e.g.
+    ["arn:aws:iam::<account-id>:role/Admin"]. For SSO roles use the role ARN WITHOUT the
+    aws-reserved/sso.amazonaws.com/<region>/ path. Keep the value in terraform.tfvars (git-ignored).
+  EOT
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for a in var.cluster_admin_principal_arns : can(regex("^arn:aws[a-z-]*:iam::[0-9]{12}:(role|user)/.+", a)) && !can(regex("aws-reserved/sso\\.amazonaws\\.com", a))])
+    error_message = "Each entry must be an IAM role/user ARN; for SSO roles drop the aws-reserved/sso.amazonaws.com/<region>/ path."
   }
 }
 

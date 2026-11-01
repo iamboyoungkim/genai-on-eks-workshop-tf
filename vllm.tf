@@ -29,7 +29,10 @@ resource "kubectl_manifest" "vllm" {
   yaml_body = each.value
 
   # Do not block the whole apply on the (large) image pull + Neuron model load.
-  wait = false
+  # NOTE: for alekc/kubectl `wait` only concerns finalizers on delete; the rollout wait
+  # is `wait_for_rollout` (default true) and times out after ~10 minutes, which aborted
+  # the first apply while the multi-GB Neuron images were still being pulled.
+  wait_for_rollout = false
 
   depends_on = [kubectl_manifest.vllm_namespace, module.eks_auto_mode]
 }

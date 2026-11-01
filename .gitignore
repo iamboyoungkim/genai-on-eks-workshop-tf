@@ -13,6 +13,9 @@ terraform.tfvars
 # Per-project kubeconfig written by `make kubeconfig`
 .kubeconfig
 
+# terraform run logs written by the Makefile (may echo resource names / account details)
+logs/
+
 # Secrets / keys
 *.pem
 *.key

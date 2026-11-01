@@ -19,8 +19,10 @@ module "eks_auto_mode" {
   vpc_id              = module.vpc.vpc_id
   subnet_ids          = module.vpc.private_subnets
   api_allowed_cidrs   = var.api_allowed_cidrs
-  enable_efs          = var.enable_efs
-  efs_file_system_id  = var.enable_efs ? aws_efs_file_system.this[0].id : ""
+
+  cluster_admin_principal_arns = var.cluster_admin_principal_arns
+  enable_efs                   = var.enable_efs
+  efs_file_system_id           = var.enable_efs ? aws_efs_file_system.this[0].id : ""
 
   depends_on = [aws_efs_mount_target.this]
 }

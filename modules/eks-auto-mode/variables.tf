@@ -5,6 +5,12 @@ variable "vpc_id" { type = string }
 variable "subnet_ids" { type = list(string) }
 variable "api_allowed_cidrs" { type = list(string) }
 
+variable "cluster_admin_principal_arns" {
+  description = "Extra principals granted AmazonEKSClusterAdminPolicy (e.g. the Console sign-in role)."
+  type        = list(string)
+  default     = []
+}
+
 variable "enable_efs" {
   description = "Install the EFS CSI driver and the 'efs' StorageClass. Must be known at plan time."
   type        = bool

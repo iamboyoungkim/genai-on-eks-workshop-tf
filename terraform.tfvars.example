@@ -2,6 +2,10 @@
 # Required: who may reach the public EKS API endpoint (IAM auth still applies).
 api_allowed_cidrs = ["203.0.113.10/32"]
 
+# Recommended: the role you sign in to the AWS Console with, so the EKS Console can show
+# nodes and workloads (otherwise only the identity that ran Terraform can see them).
+# cluster_admin_principal_arns = ["arn:aws:iam::111122223333:role/Admin"]
+
 # Optional overrides (defaults shown)
 # name            = "genai-on-eks"
 # region          = "ap-northeast-2"
