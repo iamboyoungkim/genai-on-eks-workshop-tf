@@ -1,0 +1,20 @@
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash*.log
+# Real variable values (may contain your IP / account details). Keep the .example.
+terraform.tfvars
+*.auto.tfvars
+# NOTE: .terraform.lock.hcl is intentionally committed (provider pinning).
+
+# Per-project kubeconfig written by `make kubeconfig`
+.kubeconfig
+
+# Secrets / keys
+*.pem
+*.key
+.env
+.env.*

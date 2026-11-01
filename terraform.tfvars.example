@@ -1,0 +1,11 @@
+# `make tfvars` writes terraform.tfvars with your current public IP.
+# Required: who may reach the public EKS API endpoint (IAM auth still applies).
+api_allowed_cidrs = ["203.0.113.10/32"]
+
+# Optional overrides (defaults shown)
+# name            = "genai-on-eks"
+# region          = "ap-northeast-2"
+# enable_efs      = true
+# admin_email     = "admin@example.com"
+# vllm_models     = { "qwen3-8b-neuron" = true, "deepseek-r1-qwen3-8b-neuron" = true }
+# bedrock_models  = { "claude-4.5-sonnet" = "global.anthropic.claude-sonnet-4-5-20250929-v1:0" }
