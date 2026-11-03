@@ -41,7 +41,7 @@ outputs next to the components). This stack exposes nothing publicly, so a small
 
 ```bash
 make workshop-setup   # starter-kit @ the pinned commit -> .workshop/starter-kit, its .env, components/ai-gateway/litellm/values.rendered.yaml
-make pf-start         # detached, auto-restarting port-forwards on 127.0.0.1: Open WebUI :8000, LiteLLM :4000, Langfuse :3000
+make pf-start         # detached, auto-restarting port-forwards on 127.0.0.1: Open WebUI :8000, LiteLLM :4000, Langfuse :3000, Grafana :3001 (if enabled)
 eval "$(scripts/workshop.sh env)"   # in each terminal you follow the labs in (bash or zsh)
 make workshop-status  # what is set up / listening; `make pf-stop` stops the forwards
 ```
@@ -61,7 +61,41 @@ After `eval`, the lab commands work as written:
 
 `make workshop-setup` never overwrites an edited `values.rendered.yaml` (regenerate with `FORCE_VALUES=1 make workshop-setup`).
 Everything under `.workshop/` is git-ignored and holds credentials (mode 600/700).
-Not provided: the labs' own installs (KEDA, ADOT/AMP/AMG, External Secrets, KubeRay), the VSC IDE, and the GPU node pool.
+Not provided: External Secrets and KubeRay (A4), the VSC IDE, and the GPU node pool. KEDA, AMP/ADOT and Grafana are available as opt-in add-ons (next section).
+
+### Optional add-ons for the A3 labs
+
+All three are **off by default** (set them in `terraform.tfvars`, then `make apply`). They exist because the labs install these by hand
+from manifests that are missing upstream or that do not work as written in this stack.
+
+| Variable | Default | What it adds |
+|---|---|---|
+| `enable_ab_routing` | `false` | LiteLLM model groups for the model-routing lab: `loan-processing` (Claude weight 8 / Qwen weight 2), `loan-processing-simple` (Qwen), `loan-processing-complex` (Claude), with fallbacks. |
+| `enable_monitoring` | `false` | Amazon Managed Prometheus workspace, neuron-monitor DaemonSet, ADOT collector and an in-cluster Grafana (ClusterIP) with a vLLM/Neuron dashboard. IAM roles are scoped to that one workspace. |
+| `enable_vllm_autoscaling` | `false` | KEDA plus a ScaledObject that scales the Qwen deployment on `sum(vllm:num_requests_waiting)`. Needs `enable_monitoring = true`. |
+| `vllm_max_replicas` | `3` | Upper bound for that ScaledObject (1-5). **Each replica is one more inf2.xlarge node**, so this is also your cost cap. |
+
+```hcl
+# terraform.tfvars
+enable_ab_routing       = true
+enable_monitoring       = true
+enable_vllm_autoscaling = true
+vllm_max_replicas       = 3
+```
+
+- **A/B routing.** The `loan-processing` group needs a virtual key that lists it in its models:
+  `AGENT_KEY_ALIAS=agent-key-ab AGENT_KEY_MODELS="bedrock/claude-4.5-sonnet,vllm/qwen3-8b-neuron,vllm/deepseek-r1-qwen3-8b-neuron,loan-processing,loan-processing-simple,loan-processing-complex" scripts/workshop.sh agent-key`.
+  Check the split with `scripts/ab-test.sh 100` (counts the answering backend per request via the `x-litellm-model-id` header; use a second
+  argument such as `loan-processing-simple` for the other groups). Use at least 100 requests: 20 can easily show 15/5 or 17/3.
+- **Monitoring.** Grafana is reached with `make pf-start` (port-forward on `127.0.0.1:3001`), user `admin`, password from
+  `terraform output -json credentials | jq -r .grafana_password`. Right after a fresh apply the ADOT/Grafana pods may start before the EKS Pod
+  Identity association has propagated (`no EC2 IMDS role found`); `kubectl -n adot rollout restart deploy/adot-collector` (and `-n grafana`) fixes it.
+  On Inferentia `vllm:gpu_cache_usage_perc` stays 0 (the Neuron plugin uses static per-sequence KV slots), so the dashboard shows batch-slot
+  occupancy instead. There are no alerts based on kube-state-metrics (it is not installed).
+- **Autoscaling.** A new replica takes 13-17 minutes to become ready on a fresh node (multi-GB Neuron image pull plus model load), and Auto Mode
+  removes empty inf2 nodes within minutes, so short load tests mostly measure the cold start. Run the load for 15-20 minutes
+  (`hey -z 20m -c 8 -t 180 ...`; its default 20 s client timeout makes nearly every request fail). `make pause` pauses the ScaledObject too, and
+  Terraform ignores `spec.replicas` on the vLLM Deployments so an apply does not reset the autoscaled count.
 
 ### Saving cost between sessions: pause / resume
 
@@ -126,6 +160,7 @@ Baseline: `aws-samples/sample-genai-on-eks-starter-kit` @ `0052c58` (2026-10-15,
 | Credentials | Fixed defaults in `.env` | `random_password` |
 | Langfuse chart | Unpinned (latest is now 2.x, which does not match the values schema) | Pinned to `1.5.41` |
 | LiteLLM chart | Unpinned | Pinned to `1.106.6` |
+| LiteLLM image | `main-v1.81.3-stable` (`finish_reason=tool_calls` for `json_schema`, which breaks the Langfuse evaluator) | `main-v1.83.14-stable`, pinned to amd64 |
 | Open WebUI chart | `12.8.1` | `12.8.1` |
 | GPU NodePool / NodeClass | Included | Removed (this workshop uses inf2) |
 | ALB controller, external-dns, ingress-nginx, LWS | Included | Removed (nothing is exposed) |

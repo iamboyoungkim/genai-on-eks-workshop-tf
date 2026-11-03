@@ -8,8 +8,14 @@ api_allowed_cidrs = ["203.0.113.10/32"]
 
 # Optional overrides (defaults shown)
 # name            = "genai-on-eks"
-# region          = "ap-northeast-2"
+# region          = "us-west-2"
 # enable_efs      = true
 # admin_email     = "admin@example.com"
 # vllm_models     = { "qwen3-8b-neuron" = true, "deepseek-r1-qwen3-8b-neuron" = true }
 # bedrock_models  = { "claude-4.5-sonnet" = "global.anthropic.claude-sonnet-4-5-20250929-v1:0" }
+
+# Optional A3 lab add-ons, all off by default (see README, "Optional add-ons for the A3 labs")
+# enable_ab_routing       = true   # LiteLLM groups loan-processing (8:2), -simple, -complex
+# enable_monitoring       = true   # AMP + neuron-monitor + ADOT + in-cluster Grafana
+# enable_vllm_autoscaling = true   # KEDA on vLLM queue depth (needs enable_monitoring)
+# vllm_max_replicas       = 3      # each replica = one more inf2.xlarge node
