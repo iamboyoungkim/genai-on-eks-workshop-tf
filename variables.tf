@@ -94,6 +94,47 @@ variable "bedrock_models" {
   }
 }
 
+variable "enable_ab_routing" {
+  description = <<-EOT
+    Add the A3 "model-routing" lab's weighted model group `loan-processing` (Claude weight 8 / Qwen weight 2,
+    simple-shuffle, fallback to Claude) to LiteLLM. Off by default: the lab asks learners to do this by hand.
+    Virtual keys must list `loan-processing` in their models (see scripts/workshop.sh agent-key).
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "enable_monitoring" {
+  description = <<-EOT
+    A3 "monitoring-scaling" lab, step 1: Amazon Managed Prometheus workspace, neuron-monitor DaemonSet, ADOT
+    collector and an in-cluster Grafana (ClusterIP, port-forward only). Off by default. Adds an AMP workspace
+    (billed by ingested samples) and three small pods; no extra nodes except the neuron-monitor pods landing on
+    existing inf2 nodes.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "enable_vllm_autoscaling" {
+  description = <<-EOT
+    A3 "monitoring-scaling" lab, step 2: KEDA scales the qwen3-8b-neuron Deployment on vLLM queue depth read from
+    Amazon Managed Prometheus. Needs enable_monitoring = true. Each extra replica takes one more inf2.xlarge node
+    (Auto Mode provisions it), so cost scales with vllm_max_replicas.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "vllm_max_replicas" {
+  description = "Upper bound for the KEDA ScaledObject (the workshop uses 5; each replica is one inf2.xlarge node)."
+  type        = number
+  default     = 3
+  validation {
+    condition     = var.vllm_max_replicas >= 1 && var.vllm_max_replicas <= 5
+    error_message = "vllm_max_replicas must be between 1 and 5."
+  }
+}
+
 variable "bedrock_extra_model_ids" {
   description = <<-EOT
     Bedrock model ids the LiteLLM role may invoke in addition to bedrock_models, WITHOUT adding them to
@@ -116,9 +157,9 @@ variable "litellm_chart_version" {
 }
 
 variable "litellm_image_tag" {
-  description = "Upstream pins this tag in components/ai-gateway/litellm/values.template.yaml."
+  description = "Upstream pins main-v1.81.3-stable, but that version returns finish_reason=tool_calls for json_schema (breaks the Langfuse LLM-as-a-Judge evaluator). v1.83.14 returns stop."
   type        = string
-  default     = "main-v1.81.3-stable"
+  default     = "main-v1.83.14-stable"
 }
 
 variable "langfuse_chart_version" {

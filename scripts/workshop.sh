@@ -155,7 +155,54 @@ set -a; . '$KIT/.env'; set +a
 EOF
 }
 
-PF_SPECS="openwebui:openwebui:8000:80 litellm:litellm:4000:4000 langfuse:langfuse-web:3000:3000"  # ns:svc:local:remote
+# Create the lab's "agent-key" Virtual Key through the LiteLLM API (the labs do it in the UI) and store it as
+# AGENT_KEY in the workshop .env. The key value is never printed. Models default to what this stack serves;
+# add bedrock/gpt-oss-20b (A1 lab) with AGENT_KEY_MODELS=...
+cmd_agent_key() {
+  need curl; need python3
+  [ -f "$KIT/.env" ] || die "run scripts/workshop.sh setup first"
+  curl -s -m 5 -o /dev/null http://127.0.0.1:4000/health/readiness || die "LiteLLM is not reachable on 127.0.0.1:4000 - run: make pf-start"
+  KIT_ENV="$KIT/.env" ALIAS="${AGENT_KEY_ALIAS:-agent-key-cli}" MODELS="${AGENT_KEY_MODELS:-bedrock/claude-4.5-sonnet,vllm/qwen3-8b-neuron,vllm/deepseek-r1-qwen3-8b-neuron}" python3 - <<'PY'
+import json, os, shlex, urllib.request
+
+env_path = os.environ["KIT_ENV"]
+env = {}
+with open(env_path) as f:
+    for line in f:
+        if "=" in line and not line.startswith("#"):
+            k, v = line.rstrip("\n").split("=", 1)
+            env[k] = shlex.split(v)[0] if v else ""
+master = env["LITELLM_MASTER_KEY"]
+alias_ = os.environ.get("ALIAS", "agent-key-cli")
+body = json.dumps({"key_alias": alias_, "models": os.environ["MODELS"].split(",")}).encode()
+req = urllib.request.Request("http://127.0.0.1:4000/key/generate", data=body,
+                             headers={"Authorization": "Bearer " + master, "Content-Type": "application/json"})
+try:
+    key = json.load(urllib.request.urlopen(req, timeout=30))["key"]
+except urllib.error.HTTPError as e:
+    # error bodies never contain the new key, so the message is safe to show
+    msg = ""
+    try:
+        msg = json.load(e).get("error", {}).get("message", "")
+    except Exception:
+        pass
+    hint = ""
+    if "already exists" in msg:
+        hint = " (a key with that alias exists, e.g. one made in the UI; it is left untouched - set AGENT_KEY_ALIAS to another name)"
+    raise SystemExit("key/generate failed: HTTP %s %s%s" % (e.code, msg[:200], hint))
+except Exception as e:
+    raise SystemExit("key/generate failed: %s" % type(e).__name__)
+lines = [l for l in open(env_path).read().splitlines() if not l.startswith("AGENT_KEY=")]
+old = os.umask(0o077)
+with open(env_path, "w") as f:
+    f.write("\n".join(lines) + "\nAGENT_KEY=" + shlex.quote(key) + "\n")
+os.umask(old)
+print("AGENT_KEY stored in .env (%s..., models: %s)" % (key[:6], os.environ["MODELS"]))
+PY
+  chmod 600 "$KIT/.env"
+}
+
+PF_SPECS="openwebui:openwebui:8000:80 litellm:litellm:4000:4000 langfuse:langfuse-web:3000:3000 grafana:grafana:3001:3000"  # ns:svc:local:remote
 
 cmd_pf_start() {
   need kubectl; need lsof
@@ -185,8 +232,8 @@ cmd_pf_stop() {
     while read -r pid; do [ -n "$pid" ] && kill "$pid" 2>/dev/null || true; done < "$WS/pf.pids"
   fi
   : > "$WS/pf.pids" 2>/dev/null || true
-  # the loop's current kubectl child; match tightly (loopback bind + our three services)
-  pkill -f 'kubectl -n (openwebui|litellm|langfuse) port-forward --address 127.0.0.1 svc/(openwebui|litellm|langfuse-web) ' 2>/dev/null || true
+  # the loop's current kubectl child; match tightly (loopback bind + our services)
+  pkill -f 'kubectl -n (openwebui|litellm|langfuse|grafana) port-forward --address 127.0.0.1 svc/(openwebui|litellm|langfuse-web|grafana) ' 2>/dev/null || true
   echo "port-forwards stopped"
 }
 
@@ -204,5 +251,6 @@ case "${1:-}" in
   pf-start) cmd_pf_start ;;
   pf-stop)  cmd_pf_stop ;;
   status)   cmd_status ;;
-  *) echo "usage: $0 setup | env | pf-start | pf-stop | status" >&2; exit 64 ;;
+  agent-key) cmd_agent_key ;;
+  *) echo "usage: $0 setup | env | pf-start | pf-stop | status | agent-key" >&2; exit 64 ;;
 esac

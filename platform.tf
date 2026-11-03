@@ -27,6 +27,43 @@ locals {
         aws_region_name = var.region
       }
     }],
+    # A3 model-routing lab: one virtual model, two weighted deployments (80% Claude / 20% Qwen).
+    # Built with for-expressions on purpose: a `cond ? [...] : []` expression unifies the element types and
+    # Terraform then turns `weight` into a string ("8"), which makes LiteLLM's simple-shuffle fail
+    # ("unsupported operand type(s) for +: 'int' and 'str'").
+    [for _ in(var.enable_ab_routing ? [1] : []) : {
+      model_name = "loan-processing"
+      litellm_params = {
+        model           = "bedrock/${var.bedrock_models["claude-4.5-sonnet"]}"
+        aws_region_name = var.region
+        weight          = 8
+      }
+    }],
+    [for _ in(var.enable_ab_routing ? [1] : []) : {
+      model_name = "loan-processing"
+      litellm_params = {
+        model    = "openai/qwen3-8b-neuron"
+        api_key  = "fake-key"
+        api_base = "http://qwen3-8b-neuron.vllm:8000/v1"
+        weight   = 2
+      }
+    }],
+    # A3 model-routing step 3 (complexity-based routing): the app picks the group, the gateway pins the backend.
+    [for _ in(var.enable_ab_routing ? [1] : []) : {
+      model_name = "loan-processing-simple"
+      litellm_params = {
+        model    = "openai/qwen3-8b-neuron"
+        api_key  = "fake-key"
+        api_base = "http://qwen3-8b-neuron.vllm:8000/v1"
+      }
+    }],
+    [for _ in(var.enable_ab_routing ? [1] : []) : {
+      model_name = "loan-processing-complex"
+      litellm_params = {
+        model           = "bedrock/${var.bedrock_models["claude-4.5-sonnet"]}"
+        aws_region_name = var.region
+      }
+    }],
   )
 }
 
@@ -55,6 +92,12 @@ resource "helm_release" "langfuse" {
         { name = "LANGFUSE_INIT_PROJECT_SECRET_KEY", value = local.langfuse_secret_key },
         { name = "LANGFUSE_INIT_USER_EMAIL", value = var.admin_email },
         { name = "LANGFUSE_INIT_USER_PASSWORD", value = random_password.langfuse_admin.result },
+        # Langfuse blocks LLM-connection base URLs that resolve to private/cluster IPs (SSRF protection).
+        # The A3 evaluation lab points an LLM connection at the in-cluster LiteLLM service. The check runs
+        # twice: when the connection is saved (langfuse-web) AND when an evaluator runs (langfuse-worker),
+        # so the allow-list must be set on both. langfuse.additionalEnv reaches both Deployments.
+        # (Workshop Studio sets this during provisioning; the lab page only patches langfuse-web by hand.)
+        { name = "LANGFUSE_LLM_CONNECTION_WHITELISTED_HOST", value = "litellm.litellm.svc.cluster.local" },
       ]
       resources = {
         requests = { cpu = "1", memory = "2Gi" }
@@ -122,8 +165,10 @@ resource "helm_release" "litellm" {
   timeout          = 900
 
   values = [yamlencode({
-    image  = { tag = var.litellm_image_tag }
-    global = { security = { allowInsecureImages = true } }
+    image = { tag = var.litellm_image_tag }
+    # The LiteLLM image failed with "exec format error" on arm64 nodes (observed with v1.83.14).
+    nodeSelector = { "kubernetes.io/arch" = "amd64" }
+    global       = { security = { allowInsecureImages = true } }
 
     resources = {
       requests = { cpu = "1", memory = "2Gi" }
@@ -167,7 +212,7 @@ resource "helm_release" "litellm" {
       LANGFUSE_SECRET_KEY = local.langfuse_secret_key
     }
 
-    proxy_config = {
+    proxy_config = merge({
       general_settings = {
         master_key                  = "os.environ/PROXY_MASTER_KEY"
         store_model_in_db           = true
@@ -182,7 +227,17 @@ resource "helm_release" "litellm" {
         turn_off_message_logging = false
       }
       model_list = local.litellm_model_list
-    }
+      }, var.enable_ab_routing ? {
+      router_settings = {
+        routing_strategy = "simple-shuffle"
+        num_retries      = 2
+        timeout          = 30
+        fallbacks = [
+          { "loan-processing-simple" = ["loan-processing-complex"] },
+          { "loan-processing" = ["bedrock/claude-4.5-sonnet"] },
+        ]
+      }
+    } : {})
   })]
 
   depends_on = [helm_release.langfuse, kubectl_manifest.vllm, aws_eks_pod_identity_association.litellm]
