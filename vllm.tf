@@ -34,5 +34,8 @@ resource "kubectl_manifest" "vllm" {
   # the first apply while the multi-GB Neuron images were still being pulled.
   wait_for_rollout = false
 
+  # KEDA / `make pause` change the replica count at runtime; do not reset it to the manifest's 1 on every apply.
+  ignore_fields = ["spec.replicas"]
+
   depends_on = [kubectl_manifest.vllm_namespace, module.eks_auto_mode]
 }

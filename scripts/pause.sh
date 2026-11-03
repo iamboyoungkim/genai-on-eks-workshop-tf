@@ -39,8 +39,13 @@ list_ns() {
 
 res_of() { echo "$1" | tr 'A-Z' 'a-z'; }  # Deployment -> deployment, StatefulSet -> statefulset
 
+# KEDA would scale a paused (0 replicas) target straight back up, so pause its ScaledObjects first.
+keda_pause_ns()  { $KC -n "$1" annotate scaledobject --all autoscaling.keda.sh/paused=true --overwrite >/dev/null 2>&1 || true; }
+keda_resume_ns() { $KC -n "$1" annotate scaledobject --all autoscaling.keda.sh/paused- >/dev/null 2>&1 || true; }
+
 pause_ns() {
   local ns="$1" kind name rep ann res
+  keda_pause_ns "$ns"
   list_ns "$ns" | while read -r kind name rep ann; do
     [ -n "${name:-}" ] || continue
     res="$(res_of "$kind")"
@@ -126,6 +131,7 @@ do_resume() {
   need_cluster
   # Start the slow part (inf2 nodes + image pull + model load) first, in parallel with the rest.
   scale_up_tier deploy-vllm
+  keda_resume_ns vllm   # hand the replica count back to KEDA (it keeps the restored count until the next poll)
   scale_up_tier sts
   wait_rollouts sts
   scale_up_tier deploy-other
