@@ -1,0 +1,350 @@
+{
+ "uid": "genai-infra",
+ "title": "GenAI platform: vLLM + Neuron",
+ "schemaVersion": 39,
+ "version": 1,
+ "refresh": "30s",
+ "time": {
+  "from": "now-1h",
+  "to": "now"
+ },
+ "panels": [
+  {
+   "id": 1,
+   "type": "timeseries",
+   "title": "vLLM requests: running vs waiting",
+   "description": "Queue depth is the KEDA scaling signal",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "amp"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "fillOpacity": 15,
+      "lineWidth": 1
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum(vllm:num_requests_running{model_name=\"qwen3-8b-neuron\"})",
+     "legendFormat": "running",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "amp"
+     }
+    },
+    {
+     "refId": "B",
+     "expr": "sum(vllm:num_requests_waiting{model_name=\"qwen3-8b-neuron\"})",
+     "legendFormat": "waiting",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "amp"
+     }
+    }
+   ]
+  },
+  {
+   "id": 2,
+   "type": "timeseries",
+   "title": "Batch slot occupancy (running / (replicas x max-num-seqs))",
+   "description": "vllm:gpu_cache_usage_perc is always 0 with the optimum-neuron plugin (static per-sequence KV slots, no paging). This panel uses the running requests per slot instead. 2 = --max-num-seqs in manifests/vllm/qwen3-8b-neuron.yaml.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "amp"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 0,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percentunit",
+     "custom": {
+      "fillOpacity": 15,
+      "lineWidth": 1
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum(vllm:num_requests_running{model_name=\"qwen3-8b-neuron\"}) / (count(vllm:num_requests_running{model_name=\"qwen3-8b-neuron\"}) * 2)",
+     "legendFormat": "occupancy",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "amp"
+     }
+    }
+   ]
+  },
+  {
+   "id": 3,
+   "type": "timeseries",
+   "title": "End-to-end latency P50 / P95 / P99",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "amp"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 8,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "custom": {
+      "fillOpacity": 15,
+      "lineWidth": 1
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "histogram_quantile(0.5, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket{model_name=\"qwen3-8b-neuron\"}[5m])))",
+     "legendFormat": "P50",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "amp"
+     }
+    },
+    {
+     "refId": "B",
+     "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket{model_name=\"qwen3-8b-neuron\"}[5m])))",
+     "legendFormat": "P95",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "amp"
+     }
+    },
+    {
+     "refId": "C",
+     "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket{model_name=\"qwen3-8b-neuron\"}[5m])))",
+     "legendFormat": "P99",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "amp"
+     }
+    }
+   ]
+  },
+  {
+   "id": 4,
+   "type": "timeseries",
+   "title": "Time to first token P95",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "amp"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 8,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "custom": {
+      "fillOpacity": 15,
+      "lineWidth": 1
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket{model_name=\"qwen3-8b-neuron\"}[5m])))",
+     "legendFormat": "P95",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "amp"
+     }
+    }
+   ]
+  },
+  {
+   "id": 5,
+   "type": "timeseries",
+   "title": "Token throughput (tokens/s)",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "amp"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 16,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "fillOpacity": 15,
+      "lineWidth": 1
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum(rate(vllm:prompt_tokens_total{model_name=\"qwen3-8b-neuron\"}[5m]))",
+     "legendFormat": "prompt",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "amp"
+     }
+    },
+    {
+     "refId": "B",
+     "expr": "sum(rate(vllm:generation_tokens_total{model_name=\"qwen3-8b-neuron\"}[5m]))",
+     "legendFormat": "generated",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "amp"
+     }
+    }
+   ]
+  },
+  {
+   "id": 6,
+   "type": "timeseries",
+   "title": "Requests by finish reason (per s)",
+   "description": "vLLM 0.10 has no request_failure_total; aborts show up here",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "amp"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 16,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "fillOpacity": 15,
+      "lineWidth": 1
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (finished_reason) (rate(vllm:request_success_total{model_name=\"qwen3-8b-neuron\"}[5m]))",
+     "legendFormat": "{{finished_reason}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "amp"
+     }
+    }
+   ]
+  },
+  {
+   "id": 7,
+   "type": "timeseries",
+   "title": "NeuronCore utilization (0-1 = 0-100%)",
+   "description": "Verified: busy cores report 1.0, idle cores 0",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "amp"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 24,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percentunit",
+     "custom": {
+      "fillOpacity": 15,
+      "lineWidth": 1
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "avg by (node, neuroncore) (neuroncore_utilization_ratio)",
+     "legendFormat": "{{node}} core {{neuroncore}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "amp"
+     }
+    }
+   ]
+  },
+  {
+   "id": 8,
+   "type": "timeseries",
+   "title": "Neuron runtime memory used",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "amp"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 24,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "bytes",
+     "custom": {
+      "fillOpacity": 15,
+      "lineWidth": 1
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (pod) (neuron_runtime_memory_used_bytes)",
+     "legendFormat": "{{pod}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "amp"
+     }
+    }
+   ]
+  }
+ ],
+ "tags": [
+  "genai",
+  "vllm",
+  "neuron"
+ ]
+}

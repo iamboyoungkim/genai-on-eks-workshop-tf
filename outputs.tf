@@ -32,6 +32,7 @@ output "credentials" {
     litellm_master_key  = local.litellm_master_key
     langfuse_public_key = local.langfuse_public_key
     langfuse_secret_key = local.langfuse_secret_key
+    grafana_password    = random_password.grafana_admin.result # user: admin (only used when enable_monitoring = true)
   }
 }
 
